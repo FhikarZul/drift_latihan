@@ -4,7 +4,7 @@ import 'package:equatable/equatable.dart';
 
 class SongWithGenre extends Equatable {
   final SongModel song;
-  final List<SongGenre> genreList;
+  final List<GenreModel> genreList;
 
   const SongWithGenre({
     required this.song,

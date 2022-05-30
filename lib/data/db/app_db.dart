@@ -53,7 +53,57 @@ class AppDb extends _$AppDb {
     return await into(songGenreIntermediate).insertOnConflictUpdate(entity);
   }
 
-  //select song
+  Stream<List<PlayListwithSong>> getPlaylistWithSong() {
+    final playlistStream = select(playList);
+
+    return playlistStream.watch().switchMap((rows) {
+      final Map<int, PlayListModel> idToPlaylist = {
+        for (var row in rows) row.id: row
+      };
+      final playlistIds = idToPlaylist.keys;
+
+      print('PlaylistIds : $playlistIds');
+
+      final songQuery = select(song).watch();
+
+      return songQuery.switchMap((songs) {
+        final idsToSong = {for (var item in songs) item.id: item};
+        final songIds = idsToSong.keys;
+
+        final intermediateQuery = select(songGenreIntermediate).join([
+          innerJoin(genre, genre.id.equalsExp(songGenreIntermediate.genre)),
+        ])
+          ..where(songGenreIntermediate.song.isIn(songIds));
+
+        return intermediateQuery.watch().map((items) {
+          final idToItems = <int, List<GenreModel>>{};
+
+          for (final item in items) {
+            print('item: ${item.rawData.data}');
+            final genreItem = item.readTable(genre);
+            final songItem = item.readTable(songGenreIntermediate).song;
+
+            idToItems.putIfAbsent(songItem, () => []).add(genreItem);
+          }
+
+          return playlistIds.map((itemKey) {
+            final songInPlaylist = idsToSong.values
+                .where(((element) => element.playList == itemKey));
+            final songWithGenreInPlaylist = songInPlaylist.map((e) {
+              return SongWithGenre(song: e, genreList: idToItems[e.id]!);
+            });
+
+            return PlayListwithSong(
+              playList: idToPlaylist[itemKey]!,
+              songWithGenre: songWithGenreInPlaylist.toList(),
+            );
+          }).toList();
+        });
+      });
+    });
+  }
+
+  //select play list with song and genre
   Stream<List<PlayListwithSong>> getSong() {
     final playListStream = select(playList);
 
@@ -70,32 +120,30 @@ class AppDb extends _$AppDb {
       final idsPlayList = idToPlayList.keys;
 
       //song stream
-      songStream.where((tbl) => tbl.playList.isIn(idsPlayList));
       return songStream.watch().switchMap((rows) {
         final idToSong = {for (var value in rows) value.id: value};
         final idsSong = idToSong.keys;
 
         //song genre stream
         return songGenreStream.watch().map((rows) {
-          final Map<int, List<SongGenre>> idToSongGenre = {};
+          final Map<int, List<GenreModel>> idToSongGenre = {};
 
           for (final element in rows) {
-            final songGenreItem = element.readTable(songGenreIntermediate);
+            final songItem = element.readTable(songGenreIntermediate).song;
+            final genreItem = element.readTable(genre);
 
-            idToSongGenre
-                .putIfAbsent(songGenreItem.song, () => [])
-                .add(SongGenre(genre: songGenreItem));
+            idToSongGenre.putIfAbsent(songItem, () => []).add(genreItem);
           }
 
-          final List<SongWithGenre> listSongWithGenre = [];
+          final Map<int, List<SongWithGenre>> idToSongWithGenre = {};
 
           for (var id in idsSong) {
-            listSongWithGenre.add(
-              SongWithGenre(
-                song: idToSong[id]!,
-                genreList: idToSongGenre[id]!,
-              ),
-            );
+            idToSongWithGenre.putIfAbsent(id, () => []).add(
+                  SongWithGenre(
+                    song: idToSong[id]!,
+                    genreList: idToSongGenre[id]!,
+                  ),
+                );
           }
 
           final List<PlayListwithSong> listPlayListWithSong = [];
@@ -104,7 +152,7 @@ class AppDb extends _$AppDb {
             listPlayListWithSong.add(
               PlayListwithSong(
                 playList: idToPlayList[id]!,
-                songWithGenre: listSongWithGenre,
+                songWithGenre: idToSongWithGenre[id] ?? [],
               ),
             );
           }
